@@ -1,10 +1,14 @@
-use std::io::Error;
+use std::{fmt, io::Error};
 
 const SYNC: u32 = 0xDCC023C2;
-pub const _FLAG_ACK: u8 = 0x80;
-pub const _FLAG_END: u8 = 0x40;
-pub const _FLAG_RST: u8 = 0x20;
+pub const START_ID: u16 = 0;
+pub const FLAG_ACK: u8 = 0x80;
+pub const FLAG_END: u8 = 0x40;
+pub const FLAG_RST: u8 = 0x20;
 pub const FLAG_ZER: u8 = 0x3F;
+pub const FLAG_SED: u8 = 0x0;
+pub const MAX_PAYLOAD_SIZE: usize = 4096;
+pub const MAX_SEND_ATTEMPTS: usize = 16;
 
 #[derive(Debug, Clone)]
 pub struct Payload {
@@ -54,7 +58,6 @@ impl Payload {
         };
 
         payload.chksum = Payload::checksum(&payload.as_bytes());
-        println!("{}", payload.chksum);
         payload
     }
 
@@ -105,5 +108,24 @@ impl Payload {
         bytes.extend_from_slice(&self.data);
 
         bytes
+    }
+}
+
+impl fmt::Display for Payload {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "Payload {{")?;
+        writeln!(f, " f_sync: 0x{:08X},", self.f_sync)?;
+        writeln!(f, " s_sync: 0x{:08X},", self.s_sync)?;
+        writeln!(f, " chksum: 0x{:04X},", self.chksum)?;
+        writeln!(f, " length: {},", self.length)?;
+        writeln!(f, " id: {},", self.id)?;
+        writeln!(f, " flag: 0x{:02X},", self.flag)?;
+        write!(f, " data: ")?;
+
+        match String::from_utf8(self.data.clone()) {
+            Ok(data) => write!(f, "{}", data.replace("\n", "\\n"))?,
+            Err(_) => write!(f, "<Invalid UFT-8 String>")?
+        };
+        writeln!(f, " \n}}")
     }
 }
