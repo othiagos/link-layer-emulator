@@ -57,7 +57,7 @@ impl Payload {
             data,
         };
 
-        payload.chksum = Payload::checksum(&payload.as_bytes());
+        payload.chksum = Payload::checksum(&payload.as_bytes_without_checksum());
         payload
     }
 
@@ -65,7 +65,7 @@ impl Payload {
         if data.len() < 15 {
             return Err(Error::new(
                 std::io::ErrorKind::InvalidData,
-                "Insufficient data length",
+                "Insufficient length",
             ));
         }
 
@@ -76,6 +76,13 @@ impl Payload {
         let id = u16::from_be_bytes(<[u8; 2]>::try_from(&data[12..14]).unwrap());
         let flag = u8::from_be_bytes(<[u8; 1]>::try_from(&data[14..15]).unwrap());
 
+        if f_sync != SYNC || s_sync != SYNC || f_sync != s_sync {
+            return Err(Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Received SYNC is invalid",
+            ));
+        }
+
         if data.len() < 15 + length as usize {
             return Err(Error::new(
                 std::io::ErrorKind::InvalidData,
@@ -84,8 +91,7 @@ impl Payload {
         }
 
         let data = data[15..15 + length as usize].to_vec();
-
-        Ok(Self {
+        let payload = Self {
             f_sync,
             s_sync,
             chksum,
@@ -93,7 +99,16 @@ impl Payload {
             id,
             flag,
             data,
-        })
+        };
+
+        if !Payload::is_valid_payload_checksum(&payload) {
+            return Err(Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Passed checksum is incorrect",
+            ));
+        }
+
+        Ok(payload)
     }
 
     pub fn as_bytes(&self) -> Vec<u8> {
@@ -109,23 +124,41 @@ impl Payload {
 
         bytes
     }
+
+    fn as_bytes_without_checksum(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
+    
+        bytes.extend_from_slice(&self.f_sync.to_be_bytes());
+        bytes.extend_from_slice(&self.s_sync.to_be_bytes());
+        bytes.extend_from_slice(&0u16.to_be_bytes());
+        bytes.extend_from_slice(&self.length.to_be_bytes());
+        bytes.extend_from_slice(&self.id.to_be_bytes());
+        bytes.extend_from_slice(&self.flag.to_be_bytes());
+        bytes.extend_from_slice(&self.data);
+    
+        bytes
+    }
+
+    fn is_valid_payload_checksum(payload: &Payload) -> bool {
+        payload.chksum == Payload::checksum(&payload.as_bytes_without_checksum())
+    }
 }
 
 impl fmt::Display for Payload {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "Payload {{")?;
-        writeln!(f, " f_sync: 0x{:08X},", self.f_sync)?;
-        writeln!(f, " s_sync: 0x{:08X},", self.s_sync)?;
-        writeln!(f, " chksum: 0x{:04X},", self.chksum)?;
-        writeln!(f, " length: {},", self.length)?;
-        writeln!(f, " id: {},", self.id)?;
-        writeln!(f, " flag: 0x{:02X},", self.flag)?;
+        write!(f, "Payload {{")?;
+        write!(f, " f_sync: 0x{:08X},", self.f_sync)?;
+        write!(f, " s_sync: 0x{:08X},", self.s_sync)?;
+        write!(f, " chksum: 0x{:04X},", self.chksum)?;
+        write!(f, " length: {},", self.length)?;
+        write!(f, " id: {},", self.id)?;
+        write!(f, " flag: 0x{:02X},", self.flag)?;
         write!(f, " data: ")?;
 
         match String::from_utf8(self.data.clone()) {
             Ok(data) => write!(f, "{}", data.replace("\n", "\\n"))?,
-            Err(_) => write!(f, "<Invalid UFT-8 String>")?
+            Err(_) => write!(f, "<Invalid UFT-8 String>")?,
         };
-        writeln!(f, " \n}}")
+        write!(f, " }}")
     }
 }

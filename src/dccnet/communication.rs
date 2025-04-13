@@ -9,19 +9,20 @@ use super::network::Payload;
 use super::network;
 
 pub fn next_id(id: u16) -> u16 {
-    if id > 0 { 0 } else { 1 }
+    (id + 1) % 2
 }
 
-pub fn send_frame(stream: &mut TcpStream, payload: Payload) -> Result<(), Error> {
+pub fn send_frame(stream: &mut TcpStream, payload: &Payload, res_data: &mut Vec<u8>) -> Result<usize, Error> {
     println!("SEND {payload}");
 
-    for i in 0..network::MAX_SEND_ATTEMPTS {
-        let _ = stream.write(&payload.as_bytes())?;
-        if wait_ack(stream, payload.id).is_ok() {
-            return Ok(());
+    for curr_attempt in 0..network::MAX_SEND_ATTEMPTS {
+        stream.write_all(&payload.as_bytes())?;
+        
+        if wait_ack(stream, payload.id, res_data).is_ok() {
+            return Ok(curr_attempt);
         }
 
-        println!("({}, 16)", i);
+        print!("({}) ", curr_attempt);
 
         thread::sleep(Duration::new(1, 0));
     }
@@ -34,23 +35,25 @@ pub fn send_frame(stream: &mut TcpStream, payload: Payload) -> Result<(), Error>
 
 pub fn receive_frame(stream: &mut TcpStream) -> Result<Payload, Error> {
     let mut buf = vec![0u8; network::MAX_PAYLOAD_SIZE];
-    let _res_read = stream.read(&mut buf).unwrap();
+    let bytes_read = stream.read(&mut buf).unwrap();
 
-    let payload = network::Payload::from_bytes(&buf).unwrap();
+    let payload = network::Payload::from_bytes(&buf[..bytes_read])?;
     println!("RECEIVED {}", payload);
 
     send_ack(stream, payload.id);
     Ok(payload)
 }
 
-fn wait_ack(stream: &mut TcpStream, id: u16) -> Result<Payload, Error> {
+fn wait_ack(stream: &mut TcpStream, id: u16, ack_payload: &mut Vec<u8>) -> Result<Payload, Error> {
     let mut buf = vec![0u8; network::MAX_PAYLOAD_SIZE];
-    let bytes_read = stream.read(&mut buf)?;
+    let bytes_read = stream.read(&mut buf).unwrap();
 
-    let payload = network::Payload::from_bytes(&buf[..bytes_read]).unwrap();
-    println!("RECEIVED {payload}");
+    let payload = network::Payload::from_bytes(&buf[..bytes_read])?;
+    println!("RECEIVED ACK {payload}");
 
     if payload.flag != network::FLAG_ACK {
+        *ack_payload = payload.data;
+
         return Err(Error::new(
             std::io::ErrorKind::InvalidData,
             "ACK not received",
@@ -69,7 +72,7 @@ fn wait_ack(stream: &mut TcpStream, id: u16) -> Result<Payload, Error> {
 
 fn send_ack(stream: &mut TcpStream, id: u16) {
     let payload = Payload::new(vec![], id, network::FLAG_ACK);
-    println!("SEND {payload}");
+    println!("SEND ACK {payload}");
 
-    let _ = stream.write(&payload.as_bytes());
+    stream.write_all(&payload.as_bytes()).unwrap();
 }

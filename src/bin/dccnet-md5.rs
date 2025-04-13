@@ -25,7 +25,12 @@ fn main() {
     };
 
     match TcpStream::connect((server_address, server_port)) {
-        Ok(mut stream) => dccnet::net_md5::handle_tcp_communication(&mut stream, gas),
+        Ok(mut stream) => {
+            if let Err(e) = dccnet::net_md5::handle_tcp_communication(&mut stream, gas) {
+                eprintln!("Error during TCP communication: {:?}", e.to_string());
+                std::process::exit(1);
+            }
+        },
         Err(e) => {
             eprintln!("Failed to connect to the server: {:?}", e.to_string());
             std::process::exit(1);
