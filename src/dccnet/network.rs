@@ -76,7 +76,7 @@ impl Payload {
         let id = u16::from_be_bytes(<[u8; 2]>::try_from(&data[12..14]).unwrap());
         let flag = u8::from_be_bytes(<[u8; 1]>::try_from(&data[14..15]).unwrap());
 
-        println!("{:?}", data);
+        if let Ok(str) = String::from_utf8(data.to_vec()) { println!("{}", str) }
         if f_sync != SYNC || s_sync != SYNC || f_sync != s_sync {
             return Err(Error::new(
                 std::io::ErrorKind::InvalidData,

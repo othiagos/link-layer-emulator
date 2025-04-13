@@ -10,8 +10,7 @@ fn validate_gas(
 
     let gas_payload = Payload::new(gas, network::START_ID, network::FLAG_SED);
 
-    let mut res_data = vec![];
-    communication::send_frame(stream_connection, &gas_payload, &mut res_data)?;
+    communication::send_frame(stream_connection, &gas_payload)?;
     let mut id = communication::next_id(gas_payload.id);
 
     let payload = communication::receive_frame(stream_connection)?;
@@ -28,8 +27,7 @@ fn validate_gas(
     let rash_string = format!("{:x}\n", md5_hash);
 
     let send_payload = Payload::new(rash_string.as_bytes().to_vec(), id, network::FLAG_SED);
-    let mut res_data = vec![];
-    communication::send_frame(stream_connection, &send_payload, &mut res_data)?;
+    communication::send_frame(stream_connection, &send_payload)?;
     id = communication::next_id(payload.id);
 
     Ok(id)
@@ -43,44 +41,56 @@ fn trim_data_payload(data: Vec<u8>) -> Result<Vec<u8>, Error> {
 }
 
 fn read_date_from_server(stream_connection: &mut TcpStream, mut id: u16) -> Result<(), Error> {
-    let mut end_communication = false;
     let mut payload_data = vec![];
-    let mut payload = Payload::new(vec![], id, network::FLAG_SED);
 
-    while !end_communication {
-
-        // if payload_data.is_empty() {
-        //     payload = communication::receive_frame(stream_connection)?;
-        //     payload_data = payload.data;
-        // }
-        payload = communication::receive_frame(stream_connection)?;
-        payload_data = payload.data;
-        
-        id = communication::next_id(id);
-        payload_data = trim_data_payload(payload_data)?;
-
-        println!("MSG: {:?}", String::from_utf8(payload_data.clone()).unwrap());
-        let md5_hash = md5::compute(payload_data);
-        let rash_string = format!("{:x}\n", md5_hash);
-
-        let send_payload = Payload::new(rash_string.as_bytes().to_vec(), id, network::FLAG_SED);
-
-        let mut res_data = vec![];
-        communication::send_frame(stream_connection, &send_payload, &mut res_data)?;
-        // payload_data = res_data;
-        
+    loop {
+        let payload = match communication::receive_frame(stream_connection) {
+            Ok(payload) => payload,
+            Err(_) => continue,
+        };
 
         if payload.flag == network::FLAG_END {
-            end_communication = true;
+            break;
         }
+
+        if payload_data.is_empty() {
+            id = communication::next_id(id);
+        }
+
+        if !payload.data.ends_with(b"\n") {
+            payload_data.extend(payload.data);
+            continue;
+        }
+
+        payload_data.extend(trim_data_payload(payload.data)?);
+        if let Ok(str) = String::from_utf8(payload_data.clone()) {
+            println!("{}", str);
+        }
+
+        for data in payload_data.split(|&x| x == b'\n') {
+            let md5_hash = md5::compute(data);
+            let rash_string = format!("{:x}\n", md5_hash);
+
+            let send_payload = Payload::new(rash_string.as_bytes().to_vec(), id, network::FLAG_SED);
+
+            communication::send_frame(stream_connection, &send_payload)?;
+
+            id = communication::next_id(id);
+        }
+        id = communication::next_id(id);
+
+        payload_data = vec![];
     }
 
     Ok(())
 }
 
-pub fn handle_tcp_communication(stream_connection: &mut TcpStream, gas: Vec<u8>) -> Result<(), Error> {
+pub fn handle_tcp_communication(
+    stream_connection: &mut TcpStream,
+    gas: Vec<u8>,
+) -> Result<(), Error> {
     let id = validate_gas(stream_connection, gas)?;
     read_date_from_server(stream_connection, id)?;
-    
+
     Ok(())
 }
