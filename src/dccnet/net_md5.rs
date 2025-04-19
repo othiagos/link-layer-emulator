@@ -40,8 +40,9 @@ fn trim_data_payload(data: Vec<u8>) -> Result<Vec<u8>, Error> {
     }
 }
 
-fn read_date_from_server(stream_connection: &mut TcpStream, mut id: u16) -> Result<(), Error> {
+fn read_date_from_server(stream_connection: &mut TcpStream, gas: Vec<u8>) -> Result<(), Error> {
     let mut payload_data = vec![];
+    let mut id = validate_gas(stream_connection, gas)?;
 
     loop {
         let payload = match communication::receive_frame(stream_connection) {
@@ -51,6 +52,10 @@ fn read_date_from_server(stream_connection: &mut TcpStream, mut id: u16) -> Resu
 
         if payload.flag == network::FLAG_END {
             break;
+        }
+
+        if payload.flag == network::FLAG_ACK {
+            continue;
         }
 
         if payload_data.is_empty() {
@@ -63,10 +68,6 @@ fn read_date_from_server(stream_connection: &mut TcpStream, mut id: u16) -> Resu
         }
 
         payload_data.extend(trim_data_payload(payload.data)?);
-        if let Ok(str) = String::from_utf8(payload_data.clone()) {
-            println!("{}", str);
-        }
-
         for data in payload_data.split(|&x| x == b'\n') {
             let md5_hash = md5::compute(data);
             let rash_string = format!("{:x}\n", md5_hash);
@@ -79,18 +80,13 @@ fn read_date_from_server(stream_connection: &mut TcpStream, mut id: u16) -> Resu
         }
         id = communication::next_id(id);
 
-        payload_data = vec![];
+        payload_data.clear();
     }
 
     Ok(())
 }
 
-pub fn handle_tcp_communication(
-    stream_connection: &mut TcpStream,
-    gas: Vec<u8>,
-) -> Result<(), Error> {
-    let id = validate_gas(stream_connection, gas)?;
-    read_date_from_server(stream_connection, id)?;
-
+pub fn handle_tcp_communication(stream_connection: &mut TcpStream, gas: Vec<u8>) -> Result<(), Error> {
+    read_date_from_server(stream_connection, gas)?;
     Ok(())
 }

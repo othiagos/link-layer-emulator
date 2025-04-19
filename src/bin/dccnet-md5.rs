@@ -36,5 +36,4 @@ fn main() {
         eprintln!("Error during TCP communication: {:?}", e.to_string());
         std::process::exit(1);
     }
-
 }
