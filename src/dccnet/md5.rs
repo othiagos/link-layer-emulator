@@ -33,6 +33,7 @@ fn validate_gas(
     Ok(id)
 }
 
+#[inline(always)]
 fn trim_data_payload(data: Vec<u8>) -> Result<Vec<u8>, Error> {
     match String::from_utf8(data) {
         Ok(data) => Ok(data.trim().as_bytes().to_vec()),
@@ -86,7 +87,10 @@ fn read_date_from_server(stream_connection: &mut TcpStream, gas: Vec<u8>) -> Res
     Ok(())
 }
 
-pub fn handle_tcp_communication(stream_connection: &mut TcpStream, gas: Vec<u8>) -> Result<(), Error> {
+pub fn handle_tcp_communication(
+    stream_connection: &mut TcpStream,
+    gas: Vec<u8>,
+) -> Result<(), Error> {
     read_date_from_server(stream_connection, gas)?;
     Ok(())
 }
