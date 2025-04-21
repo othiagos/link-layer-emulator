@@ -31,11 +31,32 @@ fn parse_server_args(args: &[String]) {
     server::run_server(port, input, output);
 }
 
+fn parse_address(addr: &str) -> (&str, &str) {
+    if addr.starts_with('[') {
+        // IPv6 with brackets, e.g., [::1]:8080
+        if let Some(end_bracket) = addr.find(']') {
+            let ip = &addr[1..end_bracket];
+            let port = &addr[end_bracket + 2..]; // Skip "]:" (2 characters)
+            (ip, port)
+        } else {
+            eprintln!("Invalid IPv6 format: {}", addr);
+            process::exit(1);
+        }
+    } else {
+        // IPv4 or invalid, try splitting by the last ':'
+        if let Some(pos) = addr.rfind(':') {
+            let ip = &addr[..pos];
+            let port = &addr[pos + 1..];
+            (ip, port)
+        } else {
+            eprintln!("Invalid IP:PORT format: {}", addr);
+            process::exit(1);
+        }
+    }
+}
+
 fn parse_client_args(args: &[String]) {
-    let (server_ip, server_port) = args[2].split_once(':').unwrap_or_else(|| {
-        eprintln!("Invalid IP:PORT format: {}", args[2]);
-        process::exit(1);
-    });
+    let (server_ip, server_port) = parse_address(&args[2]);
 
     let server_port = server_port.parse::<u16>().unwrap_or_else(|_| {
         eprintln!("Invalid port: {}", server_port);
@@ -70,6 +91,7 @@ fn print_usage_and_exit(program_name: &str) {
 fn main() {
     let args: Vec<String> = env::args().collect();
 
+    println!("Arguments: {:?}", args);
     if args.len() != 5 {
         print_usage_and_exit(&args[0]);
     }

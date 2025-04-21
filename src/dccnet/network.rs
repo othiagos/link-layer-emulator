@@ -1,4 +1,4 @@
-use std::{fmt, io::Error};
+use std::fmt;
 
 const SYNC: u32 = 0xDCC023C2;
 pub const START_ID: u16 = 0;
@@ -11,6 +11,42 @@ pub const MAX_DATA_SIZE: usize = 0x1000;
 pub const PAYLOAD_HEADER_SIZE: usize = 15;
 pub const MAX_PAYLOAD_SIZE: usize = MAX_DATA_SIZE + PAYLOAD_HEADER_SIZE;
 pub const MAX_SEND_ATTEMPTS: usize = 16;
+
+#[derive(Debug, PartialEq)]
+#[allow(dead_code)]
+pub enum PayloadErrorKind {
+    InvalidPayload,
+    InvalidSync,
+    InvalidData,
+    ChecksumMismatch,
+    Other
+}
+
+impl fmt::Display for PayloadErrorKind {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+pub struct PayloadError {
+    pub kind: PayloadErrorKind,
+    pub message: String,
+}
+
+impl PayloadError {
+    pub fn new(kind: PayloadErrorKind, message: &str) -> Self {
+        Self {
+            kind,
+            message: message.to_string(),
+        }
+    }
+}
+
+impl fmt::Display for PayloadError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}: {}", self.kind, self.message)
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct Payload {
@@ -70,15 +106,15 @@ impl Payload {
                 data,
             }
         };
-            
+
         payload.chksum = Payload::checksum(&payload.as_bytes_without_checksum());
         payload
     }
 
-    pub fn from_bytes(payload: &[u8]) -> Result<Self, Error> {
+    pub fn from_bytes(payload: &[u8]) -> Result<Self, PayloadError> {
         if payload.len() < PAYLOAD_HEADER_SIZE {
-            return Err(Error::new(
-                std::io::ErrorKind::InvalidData,
+            return Err(PayloadError::new(
+                PayloadErrorKind::InvalidPayload,
                 "Insufficient length",
             ));
         }
@@ -91,15 +127,15 @@ impl Payload {
         let flag = u8::from_be_bytes(<[u8; 1]>::try_from(&payload[14..15]).unwrap());
 
         if f_sync != SYNC || s_sync != SYNC || f_sync != s_sync {
-            return Err(Error::new(
-                std::io::ErrorKind::InvalidData,
+            return Err(PayloadError::new(
+                PayloadErrorKind::InvalidSync,
                 "Received SYNC is invalid",
             ));
         }
 
         if payload.len() - PAYLOAD_HEADER_SIZE != length as usize {
-            return Err(Error::new(
-                std::io::ErrorKind::InvalidData,
+            return Err(PayloadError::new(
+                PayloadErrorKind::InvalidData,
                 "Insufficient data length",
             ));
         }
@@ -116,8 +152,8 @@ impl Payload {
         };
 
         if !Payload::is_valid_payload_checksum(&payload) {
-            return Err(Error::new(
-                std::io::ErrorKind::InvalidData,
+            return Err(PayloadError::new(
+                PayloadErrorKind::ChecksumMismatch,
                 "Passed checksum is incorrect",
             ));
         }
@@ -168,7 +204,7 @@ impl fmt::Display for Payload {
         write!(f, " id: {},", self.id)?;
         write!(f, " flag: 0x{:02X},", self.flag)?;
         write!(f, " data: [frame data]")?;
-        
+
         // write!(f, " data: ")?;
         // match String::from_utf8(self.data.clone()) {
         //     Ok(data) => write!(f, "{}", data.replace("\n", "\\n"))?,

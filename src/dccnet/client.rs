@@ -53,5 +53,6 @@ pub fn run_client<A: ToSocketAddrs>(
         eprintln!("Send thread panicked: {:?}", e);
     });
 
+    println!("End connection with server!");
     Ok(())
 }

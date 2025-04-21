@@ -10,8 +10,8 @@ use crate::dccnet::xfer::{handle_client_receive, handle_client_send};
 
 pub fn run_server(port: u16, input: BufReader<File>, output: BufWriter<File>) {
     let listener =
-        TcpListener::bind(format!("127.0.0.1:{}", port)).expect("Failed to bind to address");
-    println!("Server listening on 127.0.0.1:{}", port);
+        TcpListener::bind(format!("[::]:{}", port)).expect("Failed to bind to address");
+    println!("Server listening on [::]:{}", port);
 
     let input = Arc::new(Mutex::new(input));
     let output = Arc::new(Mutex::new(output));

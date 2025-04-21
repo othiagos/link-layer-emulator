@@ -10,10 +10,21 @@ fn validate_gas(
 
     let gas_payload = Payload::new(gas, network::START_ID, network::FLAG_SED);
 
-    communication::send_frame(stream_connection, &gas_payload)?;
+    communication::send_frame(stream_connection, &gas_payload).map_err(|e| {
+        Error::new(
+            std::io::ErrorKind::Other,
+            format!("Failed to send gas payload: {}", e),
+        )
+    })?;
+
     let mut id = communication::next_id(gas_payload.id);
 
-    let payload = communication::receive_frame(stream_connection)?;
+    let payload = communication::receive_frame(stream_connection).map_err(|e| {
+        Error::new(
+            std::io::ErrorKind::Other,
+            format!("Failed to receive payload: {}", e),
+        )
+    })?;
 
     if gas_payload.id != payload.id {
         return Err(Error::new(
@@ -27,7 +38,13 @@ fn validate_gas(
     let rash_string = format!("{:x}\n", md5_hash);
 
     let send_payload = Payload::new(rash_string.as_bytes().to_vec(), id, network::FLAG_SED);
-    communication::send_frame(stream_connection, &send_payload)?;
+    communication::send_frame(stream_connection, &send_payload).map_err(|e| {
+        Error::new(
+            std::io::ErrorKind::Other,
+            format!("Failed to send MD5 payload: {}", e),
+        )
+    })?;
+
     id = communication::next_id(payload.id);
 
     Ok(id)
@@ -75,7 +92,12 @@ fn read_date_from_server(stream_connection: &mut TcpStream, gas: Vec<u8>) -> Res
 
             let send_payload = Payload::new(rash_string.as_bytes().to_vec(), id, network::FLAG_SED);
 
-            communication::send_frame(stream_connection, &send_payload)?;
+            communication::send_frame(stream_connection, &send_payload).map_err(|e| {
+                Error::new(
+                    std::io::ErrorKind::Other,
+                    format!("Failed to send MD5 payload: {}", e),
+                )
+            })?;
 
             id = communication::next_id(id);
         }

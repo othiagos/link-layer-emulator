@@ -11,4 +11,3 @@ name = "crate_net"
 
 [dependencies]
 md5 = "0.7"
-

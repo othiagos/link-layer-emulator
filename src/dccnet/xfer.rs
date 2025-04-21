@@ -2,13 +2,10 @@ use std::{
     fs::File,
     io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write},
     net::TcpStream,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex}, thread::sleep, time::Duration,
 };
 
-use crate::dccnet::{
-    communication::{self, receive_frame, send_end, send_frame, send_rst},
-    network::{self, Payload},
-};
+use crate::dccnet::{communication::{self, NetworkErrorKind}, network::{self, Payload}};
 
 pub fn handle_client_send(
     stream: &mut TcpStream,
@@ -20,26 +17,29 @@ pub fn handle_client_send(
     loop {
         let mut read_buf = vec![0u8; network::MAX_DATA_SIZE];
 
-        let mut input_file = input.lock().unwrap();
-        input_file.seek(SeekFrom::Start(current_file_offset))?;
-
-        let bytes_read = input_file.read(&mut read_buf)?;
+        let bytes_read = {
+            let mut input_file = input.lock().unwrap();
+            input_file.seek(SeekFrom::Start(current_file_offset))?;
+            input_file.read(&mut read_buf)?
+        };
         current_file_offset += bytes_read as u64;
 
         if bytes_read == 0 {
-            send_end(stream, id);
+            communication::send_end(stream, id);
             break;
         }
 
         let payload = Payload::new(read_buf[..bytes_read].to_vec(), id, network::FLAG_SED);
-
-        if let Err(e) = send_frame(stream, &payload) {
-            if e.kind() == std::io::ErrorKind::Other {
-                send_rst(stream, Some(e.to_string().as_bytes().to_vec()));
+        if let Err(e) = communication::send_frame_without_ack(stream, &payload) {
+            if e.kind == NetworkErrorKind::ConnectionError {
+                println!("Connection error: {}", e);
                 break;
             }
 
-            return Err(e);
+            if e.kind == NetworkErrorKind::RetransmissionError {
+                break;
+            }
+            continue;
         }
 
         id = communication::next_id(id);
@@ -56,12 +56,13 @@ pub fn handle_client_receive(
     let mut id: u16 = network::START_ID;
 
     loop {
-        let payload = match receive_frame(stream) {
+        let payload = match communication::receive_frame_without_ack(stream) {
             Ok(payload) => payload,
             Err(e) => {
-                println!("Error receiving frame: {}", e);
-                let error_name = e.to_string();
-                send_rst(stream, Some(error_name.as_bytes().to_vec()));
+                if e.kind == NetworkErrorKind::UnexpectedFlagError {
+                    continue;
+                }
+
                 break;
             }
         };
@@ -70,17 +71,15 @@ pub fn handle_client_receive(
             break;
         }
 
-        if payload.flag == network::FLAG_ACK {
-            continue;
-        }
-
         if payload.id != id {
             continue;
         }
 
-        let mut output_file = output.lock().unwrap();
-        output_file.write_all(&payload.data)?;
-        output_file.flush()?;
+        {
+            let mut output_file = output.lock().unwrap();
+            output_file.write_all(&payload.data)?;
+            output_file.flush()?;
+        }
 
         id = communication::next_id(id);
     }
