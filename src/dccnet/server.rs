@@ -56,20 +56,20 @@ async fn handle_incoming_connection(
 
     let (result_receive, result_send) = tokio::join!(future_receive, future_send);
 
-    result_send.unwrap_or_else(|e| {
+    result_receive.unwrap_or_else(|e| {
         let error_message = e.to_string();
         tokio::spawn(async move {
             communication::send_rst(&mut reader, Some(error_message.as_bytes().to_vec())).await;
         });
-        eprintln!("Error receiving data: {}", e);
+        eprintln!("Error sending data: {}", e);
     });
 
-    result_receive.unwrap_or_else(|e| {
+    result_send.unwrap_or_else(|e| {
         let error_message = e.to_string();
         tokio::spawn(async move {
             communication::send_rst(&mut writer, Some(error_message.as_bytes().to_vec())).await;
         });
-        eprintln!("Error sending data: {}", e);
+        eprintln!("Error receiving data: {}", e);
     });
 
     println!("Connection closed with {}", peer_addr);
