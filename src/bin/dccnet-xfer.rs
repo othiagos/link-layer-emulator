@@ -7,7 +7,7 @@ use std::process;
 use crate_net::dccnet::client;
 use crate_net::dccnet::server;
 
-fn parse_server_args(args: &[String]) {
+async fn parse_server_args(args: &[String]) {
     let port = args[2].parse::<u16>().unwrap_or_else(|_| {
         eprintln!("Invalid port: {}", args[2]);
         process::exit(1);
@@ -28,26 +28,26 @@ fn parse_server_args(args: &[String]) {
     let input = BufReader::new(input_file);
     let output = BufWriter::new(output_file);
 
-    server::run_server(port, input, output);
+    server::run_server(port, input, output).await;
 }
 
-fn parse_address(addr: &str) -> (&str, &str) {
+fn parse_address(addr: &str) -> (String, String) {
     if addr.starts_with('[') {
         // IPv6 with brackets, e.g., [::1]:8080
         if let Some(end_bracket) = addr.find(']') {
             let ip = &addr[1..end_bracket];
             let port = &addr[end_bracket + 2..]; // Skip "]:" (2 characters)
-            (ip, port)
+            (ip.to_string(), port.to_string())
         } else {
             eprintln!("Invalid IPv6 format: {}", addr);
             process::exit(1);
         }
     } else {
-        // IPv4 or invalid, try splitting by the last ':'
+        // IPv4, hostname, or invalid, try splitting by the last ':'
         if let Some(pos) = addr.rfind(':') {
             let ip = &addr[..pos];
             let port = &addr[pos + 1..];
-            (ip, port)
+            (ip.to_string(), port.to_string())
         } else {
             eprintln!("Invalid IP:PORT format: {}", addr);
             process::exit(1);
@@ -55,7 +55,7 @@ fn parse_address(addr: &str) -> (&str, &str) {
     }
 }
 
-fn parse_client_args(args: &[String]) {
+async fn parse_client_args(args: &[String]) {
     let (server_ip, server_port) = parse_address(&args[2]);
 
     let server_port = server_port.parse::<u16>().unwrap_or_else(|_| {
@@ -78,7 +78,11 @@ fn parse_client_args(args: &[String]) {
     let input = BufReader::new(input_file);
     let output = BufWriter::new(output_file);
 
-    let _ = client::run_client((server_ip, server_port), input, output);
+    client::run_client((server_ip, server_port), input, output)
+        .await
+        .unwrap_or_else(|e| {
+            eprintln!("Error in client: {}", e);
+        });
 }
 
 fn print_usage_and_exit(program_name: &str) {
@@ -88,17 +92,17 @@ fn print_usage_and_exit(program_name: &str) {
     process::exit(1);
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let args: Vec<String> = env::args().collect();
-
     println!("Arguments: {:?}", args);
     if args.len() != 5 {
         print_usage_and_exit(&args[0]);
     }
 
     match args[1].as_str() {
-        "-s" => parse_server_args(&args),
-        "-c" => parse_client_args(&args),
+        "-s" => parse_server_args(&args).await,
+        "-c" => parse_client_args(&args).await,
         _ => {
             eprintln!("Invalid mode: {}", args[1]);
             print_usage_and_exit(&args[0]);

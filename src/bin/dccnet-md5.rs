@@ -3,7 +3,8 @@ use std::net::TcpStream;
 
 use std::env;
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let args: Vec<String> = env::args().collect();
 
     let server: Vec<&str> = args.get(1).unwrap().split(":").collect();
@@ -25,7 +26,7 @@ fn main() {
     };
 
     let communication_result = match TcpStream::connect((server_address, server_port)) {
-        Ok(mut stream) => dccnet::md5::handle_tcp_communication(&mut stream, gas),
+        Ok(mut stream) => dccnet::md5::handle_tcp_communication(&mut stream, gas).await,
         Err(e) => {
             eprintln!("Failed to connect to the server: {:?}", e.to_string());
             std::process::exit(1);

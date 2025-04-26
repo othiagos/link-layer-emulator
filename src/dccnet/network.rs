@@ -19,7 +19,7 @@ pub enum PayloadErrorKind {
     InvalidSync,
     InvalidData,
     ChecksumMismatch,
-    Other
+    Other,
 }
 
 impl fmt::Display for PayloadErrorKind {
@@ -133,7 +133,7 @@ impl Payload {
             ));
         }
 
-        if payload.len() - PAYLOAD_HEADER_SIZE != length as usize {
+        if (PAYLOAD_HEADER_SIZE + length as usize) > payload.len() {
             return Err(PayloadError::new(
                 PayloadErrorKind::InvalidData,
                 "Insufficient data length",
