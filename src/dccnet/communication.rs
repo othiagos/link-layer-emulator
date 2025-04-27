@@ -175,8 +175,7 @@ async fn wait_ack(stream: &mut TcpStream, id: u16) -> Result<Payload, NetworkErr
             &format!("Timeout error: {}", e),
         )
     })?;
-    yield_now().await;
-
+    
     let payload = match Payload::from_bytes(&buf[..bytes_read]) {
         Ok(p) => p,
         Err(e) => {
@@ -203,6 +202,7 @@ async fn wait_ack(stream: &mut TcpStream, id: u16) -> Result<Payload, NetworkErr
         ));
     }
 
+    yield_now().await;
     println!("RECV ACK {}", payload);
     Ok(payload)
 }

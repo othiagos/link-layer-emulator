@@ -1,6 +1,7 @@
 use std::fs::File;
 use std::io::{BufReader, BufWriter};
 use std::net::{TcpStream, ToSocketAddrs};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use crate::dccnet::xfer::{handle_client_receive, handle_client_send};
@@ -19,8 +20,8 @@ pub async fn run_client<A: ToSocketAddrs>(
             eprintln!("Failed to set read timeout: {}", e);
         });
 
-    let output = std::sync::Arc::new(std::sync::Mutex::new(output));
-    let input = std::sync::Arc::new(std::sync::Mutex::new(input));
+    let output = Arc::new(Mutex::new(output));
+    let input = Arc::new(Mutex::new(input));
 
     let mut reader = stream;
     let mut writer = reader.try_clone().unwrap();

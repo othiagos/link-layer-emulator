@@ -40,7 +40,7 @@ async fn handle_incoming_connection(
     output: Arc<Mutex<BufWriter<File>>>,
 ) {
     stream
-        .set_read_timeout(Some(Duration::from_secs(5)))
+        .set_read_timeout(Some(Duration::from_secs(3)))
         .unwrap_or_else(|e| {
             eprintln!("Failed to set read timeout: {}", e);
         });
@@ -54,7 +54,7 @@ async fn handle_incoming_connection(
     let future_receive = handle_client_receive(&mut reader, output);
     let future_send = handle_client_send(&mut writer, input);
 
-    let (result_receive, result_send) = tokio::join!(future_receive, future_send);
+    let (result_receive, result_send, ) = tokio::join!(future_receive, future_send);
 
     result_receive.unwrap_or_else(|e| {
         let error_message = e.to_string();
