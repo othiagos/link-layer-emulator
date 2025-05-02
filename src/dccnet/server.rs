@@ -40,45 +40,34 @@ async fn handle_incoming_connection(
     input: &mut BufReader<File>,
     output: &mut BufWriter<File>,
 ) {
-    let peer_addr = stream.peer_addr().unwrap();
+    let peer_addr = match stream.peer_addr() {
+        Ok(addr) => addr,
+        Err(e) => {
+            eprintln!("Failed to get peer address: {}", e);
+            return;
+        }
+    };
     println!("New connection from {}", peer_addr);
 
     let (reader_half, writer_half) = stream.into_split();
-
     let reader_half_mutex = Mutex::new(reader_half);
-    let writer_half_mutex = std::sync::Arc::new(Mutex::new(writer_half));
+    let writer_half_mutex = Mutex::new(writer_half);
 
-    let future_receive = handle_client_receive(&reader_half_mutex, &writer_half_mutex, output);
-    let future_send = handle_client_send(&reader_half_mutex, &writer_half_mutex, input);
+    let handle_receive = async {
+        if let Err(e) = handle_client_receive(&reader_half_mutex, &writer_half_mutex, output).await {
+            communication::send_rst(&writer_half_mutex, None).await;
+            println!("Error receiving data: {}", e);
+        }
+    };
 
-    let (result_receive, result_send) = tokio::join!(future_receive, future_send);
+    let handle_send = async {
+        if let Err(e) = handle_client_send(&reader_half_mutex, &writer_half_mutex, input).await {
+            communication::send_rst(&writer_half_mutex, None).await;
+            println!("Error sending data: {}", e);
+        }
+    };
 
-    let writer_half_mutex_clone = writer_half_mutex.clone();
-    result_receive.unwrap_or_else(|e| {
-        let error_message = e.to_string();
-        let writer_half_mutex_clone = writer_half_mutex_clone.clone();
-        tokio::spawn(async move {
-            communication::send_rst(
-                &writer_half_mutex_clone,
-                Some(error_message.as_bytes().to_vec()),
-            )
-            .await;
-        });
-        eprintln!("Error sending data: {}", e);
-    });
-
-    result_send.unwrap_or_else(|e| {
-        let error_message = e.to_string();
-        let writer_half_mutex_clone = writer_half_mutex.clone();
-        tokio::spawn(async move {
-            communication::send_rst(
-                &writer_half_mutex_clone,
-                Some(error_message.as_bytes().to_vec()),
-            )
-            .await;
-        });
-        eprintln!("Error receiving data: {}", e);
-    });
+    tokio::join!(handle_receive, handle_send);
 
     println!("Connection closed with {}", peer_addr);
 }

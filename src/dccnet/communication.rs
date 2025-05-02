@@ -4,10 +4,12 @@ use std::{
     time::{Duration, Instant},
 };
 
+use crate::dccnet::sync_read;
+
 use super::network;
 use super::network::Payload;
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
+    io::AsyncWriteExt,
     net::tcp::{OwnedReadHalf, OwnedWriteHalf},
     sync::Mutex,
 };
@@ -74,7 +76,7 @@ pub async fn send_frame(
     stream_white: &Mutex<OwnedWriteHalf>,
     payload: &Payload,
 ) -> Result<usize, NetworkError> {
-    const RETRANSMISSION_DELAY: u64 = 200;
+    const RETRANSMISSION_DELAY: u64 = 1000;
 
     for curr_attempt in 0..network::MAX_SEND_ATTEMPTS {
         if let Err(e) = stream_white
@@ -135,27 +137,7 @@ pub async fn receive_frame(
     stream_read: &Mutex<OwnedReadHalf>,
     stream_white: &Mutex<OwnedWriteHalf>,
 ) -> Result<Payload, NetworkError> {
-    let mut buf = vec![0u8; network::MAX_PAYLOAD_SIZE];
-
-    let bytes_read = match stream_read.lock().await.read(&mut buf).await {
-        Ok(_) => buf.len(),
-        Err(e) => {
-            return Err(NetworkError::new(
-                NetworkErrorKind::ConnectionError,
-                &format!("Timeout error: {}", e),
-            ));
-        }
-    };
-
-    let payload = match Payload::from_bytes(&buf[..bytes_read]) {
-        Ok(p) => p,
-        Err(e) => {
-            return Err(NetworkError::new(
-                NetworkErrorKind::ProtocolError,
-                &format!("Failed to parse payload: {}", e),
-            ));
-        }
-    };
+    let payload = sync_read::read_stream_data(stream_read).await?;
 
     check_received_rst(&payload)?;
 
@@ -176,24 +158,7 @@ pub async fn receive_frame(
 }
 
 async fn wait_ack(stream_read: &Mutex<OwnedReadHalf>, id: u16) -> Result<Payload, NetworkError> {
-    let mut buf = vec![0u8; network::MAX_PAYLOAD_SIZE];
-
-    let bytes_read = stream_read.lock().await.read(&mut buf).await.map_err(|e| {
-        NetworkError::new(
-            NetworkErrorKind::ConnectionError,
-            &format!("Timeout error: {}", e),
-        )
-    })?;
-
-    let payload = match Payload::from_bytes(&buf[..bytes_read]) {
-        Ok(p) => p,
-        Err(e) => {
-            return Err(NetworkError::new(
-                NetworkErrorKind::ProtocolError,
-                &format!("Failed to parse payload: {}", e),
-            ));
-        }
-    };
+    let payload = sync_read::read_stream_ack(stream_read).await?;
 
     check_received_rst(&payload)?;
 
