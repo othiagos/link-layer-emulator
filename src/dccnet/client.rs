@@ -1,33 +1,32 @@
 use std::fs::File;
 use std::io::{BufReader, BufWriter};
-use std::net::{TcpStream, ToSocketAddrs};
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
+
+use tokio::net::TcpStream;
+use tokio::sync::Mutex;
 
 use crate::dccnet::xfer::{handle_client_receive, handle_client_send};
 
-pub async fn run_client<A: ToSocketAddrs>(
+pub async fn run_client<A: tokio::net::ToSocketAddrs>(
     addr: A,
-    input: BufReader<File>,
-    output: BufWriter<File>,
+    mut input: BufReader<File>,
+    mut output: BufWriter<File>,
 ) -> std::io::Result<()> {
     println!("Connecting to server");
-    let stream = TcpStream::connect(addr).expect("Could not connect to server");
 
-    stream
-        .set_read_timeout(Some(Duration::from_secs(3)))
-        .unwrap_or_else(|e| {
-            eprintln!("Failed to set read timeout: {}", e);
-        });
+    use tokio::time::{Duration, timeout};
 
-    let output = Arc::new(Mutex::new(output));
-    let input = Arc::new(Mutex::new(input));
+    let stream = timeout(Duration::from_secs(3), TcpStream::connect(addr))
+        .await
+        .expect("Timeout while connecting to server")
+        .expect("Could not connect to server");
 
-    let mut reader = stream;
-    let mut writer = reader.try_clone().unwrap();
+    let (reader_half, writer_half) = stream.into_split();
 
-    let future_send = handle_client_send(&mut writer, input);
-    let future_receive = handle_client_receive(&mut reader, output);
+    let reader_half_mutex = Mutex::new(reader_half);
+    let writer_half_mutex = std::sync::Arc::new(Mutex::new(writer_half));
+
+    let future_send = handle_client_send(&reader_half_mutex, &writer_half_mutex, &mut input);
+    let future_receive = handle_client_receive(&reader_half_mutex, &writer_half_mutex, &mut output);
 
     let (result_send, result_receive) = tokio::join!(future_send, future_receive);
 

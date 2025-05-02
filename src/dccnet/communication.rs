@@ -1,15 +1,16 @@
 use std::{
     fmt,
-    io::{Read, Write},
-    net::TcpStream,
     thread,
     time::{Duration, Instant},
 };
 
-use tokio::task::yield_now;
-
 use super::network;
 use super::network::Payload;
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    net::tcp::{OwnedReadHalf, OwnedWriteHalf},
+    sync::Mutex,
+};
 
 #[derive(Debug, PartialEq)]
 #[allow(dead_code)]
@@ -68,23 +69,30 @@ fn check_received_rst(payload: &Payload) -> Result<(), NetworkError> {
     Ok(())
 }
 
-pub async fn send_frame(stream: &mut TcpStream, payload: &Payload) -> Result<usize, NetworkError> {
+pub async fn send_frame(
+    stream_read: &Mutex<OwnedReadHalf>,
+    stream_white: &Mutex<OwnedWriteHalf>,
+    payload: &Payload,
+) -> Result<usize, NetworkError> {
     const RETRANSMISSION_DELAY: u64 = 200;
 
     for curr_attempt in 0..network::MAX_SEND_ATTEMPTS {
-        if let Err(e) = stream.write_all(&payload.as_bytes()) {
-            yield_now().await;
+        if let Err(e) = stream_white
+            .lock()
+            .await
+            .write_all(&payload.as_bytes())
+            .await
+        {
             return Err(NetworkError::new(
                 NetworkErrorKind::ConnectionError,
                 &format!("Failed to send frame: {}", e),
             ));
         }
-        yield_now().await;
         println!("SEND     {payload}");
 
         let start = Instant::now();
 
-        match wait_ack(stream, payload.id).await {
+        match wait_ack(stream_read, payload.id).await {
             Ok(_) => {
                 if curr_attempt > 0 {
                     println!("SUCCESS RETRANSMISSION");
@@ -123,20 +131,21 @@ pub async fn send_frame(stream: &mut TcpStream, payload: &Payload) -> Result<usi
     ))
 }
 
-pub async fn receive_frame(stream: &mut TcpStream) -> Result<Payload, NetworkError> {
+pub async fn receive_frame(
+    stream_read: &Mutex<OwnedReadHalf>,
+    stream_white: &Mutex<OwnedWriteHalf>,
+) -> Result<Payload, NetworkError> {
     let mut buf = vec![0u8; network::MAX_PAYLOAD_SIZE];
 
-    let bytes_read = match stream.read(&mut buf) {
-        Ok(bytes) => bytes,
+    let bytes_read = match stream_read.lock().await.read(&mut buf).await {
+        Ok(_) => buf.len(),
         Err(e) => {
-            yield_now().await;
             return Err(NetworkError::new(
                 NetworkErrorKind::ConnectionError,
                 &format!("Timeout error: {}", e),
             ));
         }
     };
-    yield_now().await;
 
     let payload = match Payload::from_bytes(&buf[..bytes_read]) {
         Ok(p) => p,
@@ -162,20 +171,20 @@ pub async fn receive_frame(stream: &mut TcpStream) -> Result<Payload, NetworkErr
         return Ok(payload);
     }
 
-    send_ack(stream, payload.id).await;
+    send_ack(stream_white, payload.id).await;
     Ok(payload)
 }
 
-async fn wait_ack(stream: &mut TcpStream, id: u16) -> Result<Payload, NetworkError> {
+async fn wait_ack(stream_read: &Mutex<OwnedReadHalf>, id: u16) -> Result<Payload, NetworkError> {
     let mut buf = vec![0u8; network::MAX_PAYLOAD_SIZE];
 
-    let bytes_read = stream.read(&mut buf).map_err(|e| {
+    let bytes_read = stream_read.lock().await.read(&mut buf).await.map_err(|e| {
         NetworkError::new(
             NetworkErrorKind::ConnectionError,
             &format!("Timeout error: {}", e),
         )
     })?;
-    
+
     let payload = match Payload::from_bytes(&buf[..bytes_read]) {
         Ok(p) => p,
         Err(e) => {
@@ -202,37 +211,48 @@ async fn wait_ack(stream: &mut TcpStream, id: u16) -> Result<Payload, NetworkErr
         ));
     }
 
-    yield_now().await;
     println!("RECV ACK {}", payload);
     Ok(payload)
 }
 
-async fn send_ack(stream: &mut TcpStream, id: u16) {
+async fn send_ack(stream_white: &Mutex<OwnedWriteHalf>, id: u16) {
     let payload = Payload::new(vec![], id, network::FLAG_ACK);
     println!("SEND ACK {payload}");
 
-    stream.write_all(&payload.as_bytes()).unwrap_or_else(|_| {
-        eprintln!("Failed to send ACK");
-    });
-    yield_now().await;
+    if let Err(e) = stream_white
+        .lock()
+        .await
+        .write_all(&payload.as_bytes())
+        .await
+    {
+        eprintln!("Failed to send ACK: {}", e);
+    }
 }
 
-pub async fn send_rst(stream: &mut TcpStream, data: Option<Vec<u8>>) {
+pub async fn send_rst(stream_white: &Mutex<OwnedWriteHalf>, data: Option<Vec<u8>>) {
     let payload = Payload::new(data.unwrap_or_default(), u16::MAX, network::FLAG_RST);
     println!("SEND RST {payload}");
 
-    stream.write_all(&payload.as_bytes()).unwrap_or_else(|_| {
-        eprintln!("Failed to send RST");
-    });
-    yield_now().await;
+    if let Err(e) = stream_white
+        .lock()
+        .await
+        .write_all(&payload.as_bytes())
+        .await
+    {
+        eprintln!("Failed to send RST: {}", e);
+    }
 }
 
-pub async fn send_end(stream: &mut TcpStream, id: u16) {
+pub async fn send_end(stream_white: &Mutex<OwnedWriteHalf>, id: u16) {
     let payload = Payload::new(vec![], id, network::FLAG_END);
     println!("SEND END {payload}");
 
-    stream.write_all(&payload.as_bytes()).unwrap_or_else(|_| {
-        eprintln!("Failed to send END");
-    });
-    yield_now().await;
+    if let Err(e) = stream_white
+        .lock()
+        .await
+        .write_all(&payload.as_bytes())
+        .await
+    {
+        eprintln!("Failed to send END: {}", e);
+    }
 }

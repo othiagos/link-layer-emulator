@@ -1,5 +1,5 @@
 use crate_net::dccnet;
-use std::net::TcpStream;
+use tokio::net::TcpStream;
 
 use std::env;
 
@@ -25,8 +25,8 @@ async fn main() {
         }
     };
 
-    let communication_result = match TcpStream::connect((server_address, server_port)) {
-        Ok(mut stream) => dccnet::md5::handle_tcp_communication(&mut stream, gas).await,
+    let communication_result = match TcpStream::connect((server_address, server_port)).await {
+        Ok(stream) => dccnet::md5::handle_tcp_communication(stream, gas).await,
         Err(e) => {
             eprintln!("Failed to connect to the server: {:?}", e.to_string());
             std::process::exit(1);

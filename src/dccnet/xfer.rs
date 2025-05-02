@@ -1,9 +1,10 @@
 use std::{
     fs::File,
     io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write},
-    net::TcpStream,
-    sync::{Arc, Mutex},
 };
+
+use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
+use tokio::sync::Mutex;
 
 use crate::dccnet::{
     communication::{self, NetworkErrorKind},
@@ -11,8 +12,9 @@ use crate::dccnet::{
 };
 
 pub async fn handle_client_send(
-    stream: &mut TcpStream,
-    input: Arc<Mutex<BufReader<File>>>,
+    stream_read: &Mutex<OwnedReadHalf>,
+    stream_white: &Mutex<OwnedWriteHalf>,
+    input: &mut BufReader<File>,
 ) -> std::io::Result<()> {
     let mut current_file_offset = 0;
     let mut id = network::START_ID;
@@ -21,19 +23,18 @@ pub async fn handle_client_send(
         let mut read_buf = vec![0u8; network::MAX_DATA_SIZE];
 
         let bytes_read = {
-            let mut input_file = input.lock().unwrap();
-            input_file.seek(SeekFrom::Start(current_file_offset))?;
-            input_file.read(&mut read_buf)?
+            input.seek(SeekFrom::Start(current_file_offset))?;
+            input.read(&mut read_buf)?
         };
         current_file_offset += bytes_read as u64;
 
         if bytes_read == 0 {
-            communication::send_end(stream, id).await;
+            communication::send_end(stream_white, id).await;
             break;
         }
 
         let payload = Payload::new(read_buf[..bytes_read].to_vec(), id, network::FLAG_SED);
-        if let Err(e) = communication::send_frame(stream, &payload).await {
+        if let Err(e) = communication::send_frame(stream_read, stream_white, &payload).await {
             if e.kind == NetworkErrorKind::ConnectionError {
                 println!("Connection error: {}", e);
                 break;
@@ -53,13 +54,14 @@ pub async fn handle_client_send(
 }
 
 pub async fn handle_client_receive(
-    stream: &mut TcpStream,
-    output: Arc<Mutex<BufWriter<File>>>,
+    stream_read: &Mutex<OwnedReadHalf>,
+    stream_white: &Mutex<OwnedWriteHalf>,
+    output: &mut BufWriter<File>,
 ) -> std::io::Result<()> {
     let mut id: u16 = network::START_ID;
 
     loop {
-        let payload = match communication::receive_frame(stream).await {
+        let payload = match communication::receive_frame(stream_read, stream_white).await {
             Ok(payload) => payload,
             Err(e) => {
                 if e.kind == NetworkErrorKind::UnexpectedFlagError {
@@ -79,9 +81,8 @@ pub async fn handle_client_receive(
         }
 
         {
-            let mut output_file = output.lock().unwrap();
-            output_file.write_all(&payload.data)?;
-            output_file.flush()?;
+            output.write_all(&payload.data)?;
+            output.flush()?;
         }
 
         id = communication::next_id(id);

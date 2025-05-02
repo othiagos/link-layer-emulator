@@ -1,30 +1,43 @@
-use std::{io::Error, net::TcpStream};
+use std::io::Error;
+
+use tokio::{
+    net::{
+        TcpStream,
+        tcp::{OwnedReadHalf, OwnedWriteHalf},
+    },
+    sync::Mutex,
+};
 
 use super::{communication, network, network::Payload};
 
 async fn validate_gas(
-    stream_connection: &mut TcpStream,
+    stream_read: &Mutex<OwnedReadHalf>,
+    stream_white: &Mutex<OwnedWriteHalf>,
     mut gas: Vec<u8>,
 ) -> Result<u16, std::io::Error> {
     gas.push(b'\n');
 
     let gas_payload = Payload::new(gas, network::START_ID, network::FLAG_SED);
 
-    communication::send_frame(stream_connection, &gas_payload).await.map_err(|e| {
-        Error::new(
-            std::io::ErrorKind::Other,
-            format!("Failed to send gas payload: {}", e),
-        )
-    })?;
+    communication::send_frame(stream_read, stream_white, &gas_payload)
+        .await
+        .map_err(|e| {
+            Error::new(
+                std::io::ErrorKind::Other,
+                format!("Failed to send gas payload: {}", e),
+            )
+        })?;
 
     let mut id = communication::next_id(gas_payload.id);
 
-    let payload = communication::receive_frame(stream_connection).await.map_err(|e| {
-        Error::new(
-            std::io::ErrorKind::Other,
-            format!("Failed to receive payload: {}", e),
-        )
-    })?;
+    let payload = communication::receive_frame(stream_read, stream_white)
+        .await
+        .map_err(|e| {
+            Error::new(
+                std::io::ErrorKind::Other,
+                format!("Failed to receive payload: {}", e),
+            )
+        })?;
 
     if gas_payload.id != payload.id {
         return Err(Error::new(
@@ -38,12 +51,14 @@ async fn validate_gas(
     let rash_string = format!("{:x}\n", md5_hash);
 
     let send_payload = Payload::new(rash_string.as_bytes().to_vec(), id, network::FLAG_SED);
-    communication::send_frame(stream_connection, &send_payload).await.map_err(|e| {
-        Error::new(
-            std::io::ErrorKind::Other,
-            format!("Failed to send MD5 payload: {}", e),
-        )
-    })?;
+    communication::send_frame(stream_read, stream_white, &send_payload)
+        .await
+        .map_err(|e| {
+            Error::new(
+                std::io::ErrorKind::Other,
+                format!("Failed to send MD5 payload: {}", e),
+            )
+        })?;
 
     id = communication::next_id(payload.id);
 
@@ -58,12 +73,17 @@ fn trim_data_payload(data: Vec<u8>) -> Result<Vec<u8>, Error> {
     }
 }
 
-async fn read_date_from_server(stream_connection: &mut TcpStream, gas: Vec<u8>) -> Result<(), Error> {
+async fn read_date_from_server(stream: TcpStream, gas: Vec<u8>) -> Result<(), Error> {
     let mut payload_data = vec![];
-    let mut id = validate_gas(stream_connection, gas).await?;
+
+    let (read_half, write_half) = stream.into_split();
+    let stream_read = Mutex::new(read_half);
+    let stream_white = Mutex::new(write_half);
+
+    let mut id = validate_gas(&stream_read, &stream_white, gas).await?;
 
     loop {
-        let payload = match communication::receive_frame(stream_connection).await {
+        let payload = match communication::receive_frame(&stream_read, &stream_white).await {
             Ok(payload) => payload,
             Err(_) => continue,
         };
@@ -92,12 +112,14 @@ async fn read_date_from_server(stream_connection: &mut TcpStream, gas: Vec<u8>) 
 
             let send_payload = Payload::new(rash_string.as_bytes().to_vec(), id, network::FLAG_SED);
 
-            communication::send_frame(stream_connection, &send_payload).await.map_err(|e| {
-                Error::new(
-                    std::io::ErrorKind::Other,
-                    format!("Failed to send MD5 payload: {}", e),
-                )
-            })?;
+            communication::send_frame(&stream_read, &stream_white, &send_payload)
+                .await
+                .map_err(|e| {
+                    Error::new(
+                        std::io::ErrorKind::Other,
+                        format!("Failed to send MD5 payload: {}", e),
+                    )
+                })?;
 
             id = communication::next_id(id);
         }
@@ -109,10 +131,7 @@ async fn read_date_from_server(stream_connection: &mut TcpStream, gas: Vec<u8>) 
     Ok(())
 }
 
-pub async fn handle_tcp_communication(
-    stream_connection: &mut TcpStream,
-    gas: Vec<u8>,
-) -> Result<(), Error> {
-    read_date_from_server(stream_connection, gas).await?;
+pub async fn handle_tcp_communication(stream: TcpStream, gas: Vec<u8>) -> Result<(), Error> {
+    read_date_from_server(stream, gas).await?;
     Ok(())
 }
