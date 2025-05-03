@@ -1,14 +1,10 @@
-use std::{fmt, time::Duration};
+use std::fmt;
 
 use crate::dccnet::sync_read;
 
 use super::network;
 use super::network::Payload;
-use tokio::{
-    io::AsyncWriteExt,
-    net::tcp::OwnedWriteHalf,
-    sync::Mutex, time::Instant,
-};
+use tokio::{io::AsyncWriteExt, net::tcp::OwnedWriteHalf, sync::Mutex};
 
 #[derive(Debug, PartialEq)]
 #[allow(dead_code)]
@@ -71,8 +67,6 @@ pub async fn send_frame(
     stream_white: &Mutex<OwnedWriteHalf>,
     payload: &Payload,
 ) -> Result<usize, NetworkError> {
-    const RETRANSMISSION_DELAY: u64 = 100;
-
     for curr_attempt in 0..network::MAX_SEND_ATTEMPTS {
         if let Err(e) = stream_white
             .lock()
@@ -87,17 +81,10 @@ pub async fn send_frame(
         }
         println!("SEND     {payload}");
 
-        let start = Instant::now();
-
         match wait_ack(payload.id).await {
             Ok(_) => {
                 if curr_attempt > 0 {
                     println!("SUCCESS RETRANSMISSION");
-                    let time = start.elapsed().as_millis() as u64;
-
-                    if time < RETRANSMISSION_DELAY {
-                        tokio::time::sleep(Duration::from_millis(RETRANSMISSION_DELAY - time)).await;
-                    }
                 }
                 return Ok(curr_attempt);
             }
@@ -111,15 +98,7 @@ pub async fn send_frame(
                 }
             }
         }
-
-        let time = start.elapsed().as_millis() as u64;
-
-        println!("({curr_attempt}) RETRANSMISSION RECEIVE TIME {time}ms");
-
-        if time < RETRANSMISSION_DELAY {
-            println!("WAIT {}ms", RETRANSMISSION_DELAY - time);
-            tokio::time::sleep(Duration::from_millis(RETRANSMISSION_DELAY - time)).await;
-        }
+        println!("({curr_attempt}) RETRANSMISSION");
     }
 
     Err(NetworkError::new(
@@ -128,9 +107,7 @@ pub async fn send_frame(
     ))
 }
 
-pub async fn receive_frame(
-    stream_white: &Mutex<OwnedWriteHalf>,
-) -> Result<Payload, NetworkError> {
+pub async fn receive_frame(stream_white: &Mutex<OwnedWriteHalf>) -> Result<Payload, NetworkError> {
     let payload = sync_read::read_stream_data().await?;
 
     check_received_rst(&payload)?;

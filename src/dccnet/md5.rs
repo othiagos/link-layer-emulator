@@ -1,17 +1,16 @@
-use std::io::Error;
+use std::{io::Error, sync::Arc};
 
 use tokio::{
     net::{
         TcpStream,
-        tcp::{OwnedReadHalf, OwnedWriteHalf},
+        tcp::OwnedWriteHalf,
     },
     sync::Mutex,
 };
 
-use super::{communication, network, network::Payload};
+use super::{communication, network::{self, Payload}, sync_read};
 
 async fn validate_gas(
-    stream_read: &Mutex<OwnedReadHalf>,
     stream_white: &Mutex<OwnedWriteHalf>,
     mut gas: Vec<u8>,
 ) -> Result<u16, std::io::Error> {
@@ -19,7 +18,7 @@ async fn validate_gas(
 
     let gas_payload = Payload::new(gas, network::START_ID, network::FLAG_SED);
 
-    communication::send_frame(stream_read, stream_white, &gas_payload)
+    communication::send_frame(stream_white, &gas_payload)
         .await
         .map_err(|e| {
             Error::new(
@@ -30,7 +29,7 @@ async fn validate_gas(
 
     let mut id = communication::next_id(gas_payload.id);
 
-    let payload = communication::receive_frame(stream_read, stream_white)
+    let payload = communication::receive_frame(stream_white)
         .await
         .map_err(|e| {
             Error::new(
@@ -51,7 +50,7 @@ async fn validate_gas(
     let rash_string = format!("{:x}\n", md5_hash);
 
     let send_payload = Payload::new(rash_string.as_bytes().to_vec(), id, network::FLAG_SED);
-    communication::send_frame(stream_read, stream_white, &send_payload)
+    communication::send_frame(stream_white, &send_payload)
         .await
         .map_err(|e| {
             Error::new(
@@ -77,13 +76,14 @@ async fn read_date_from_server(stream: TcpStream, gas: Vec<u8>) -> Result<(), Er
     let mut payload_data = vec![];
 
     let (read_half, write_half) = stream.into_split();
-    let stream_read = Mutex::new(read_half);
-    let stream_white = Mutex::new(write_half);
+    let stream_read = Arc::new(Mutex::new(read_half));
+    let stream_white = Arc::new(Mutex::new(write_half));
 
-    let mut id = validate_gas(&stream_read, &stream_white, gas).await?;
+    sync_read::read_stream_data_loop(stream_read).await;
+    let mut id = validate_gas(&stream_white, gas).await?;
 
     loop {
-        let payload = match communication::receive_frame(&stream_read, &stream_white).await {
+        let payload = match communication::receive_frame(&stream_white).await {
             Ok(payload) => payload,
             Err(_) => continue,
         };
@@ -112,7 +112,7 @@ async fn read_date_from_server(stream: TcpStream, gas: Vec<u8>) -> Result<(), Er
 
             let send_payload = Payload::new(rash_string.as_bytes().to_vec(), id, network::FLAG_SED);
 
-            communication::send_frame(&stream_read, &stream_white, &send_payload)
+            communication::send_frame(&stream_white, &send_payload)
                 .await
                 .map_err(|e| {
                     Error::new(
