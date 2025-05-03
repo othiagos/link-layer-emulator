@@ -1,8 +1,4 @@
-use std::{
-    fmt,
-    thread,
-    time::{Duration, Instant},
-};
+use std::{fmt, time::Duration};
 
 use crate::dccnet::sync_read;
 
@@ -11,7 +7,7 @@ use super::network::Payload;
 use tokio::{
     io::AsyncWriteExt,
     net::tcp::{OwnedReadHalf, OwnedWriteHalf},
-    sync::Mutex,
+    sync::Mutex, time::Instant,
 };
 
 #[derive(Debug, PartialEq)]
@@ -54,7 +50,8 @@ impl fmt::Display for NetworkError {
 
 #[inline(always)]
 pub fn next_id(id: u16) -> u16 {
-    (id + 1) % 2
+    // (id + 1) % 2
+    id + 1
 }
 
 fn check_received_rst(payload: &Payload) -> Result<(), NetworkError> {
@@ -101,7 +98,7 @@ pub async fn send_frame(
                     let time = start.elapsed().as_millis() as u64;
 
                     if time < RETRANSMISSION_DELAY {
-                        thread::sleep(Duration::from_millis(RETRANSMISSION_DELAY - time));
+                        tokio::time::sleep(Duration::from_millis(RETRANSMISSION_DELAY - time)).await;
                     }
                 }
                 return Ok(curr_attempt);
@@ -123,7 +120,7 @@ pub async fn send_frame(
 
         if time < RETRANSMISSION_DELAY {
             println!("WAIT {}ms", RETRANSMISSION_DELAY - time);
-            thread::sleep(Duration::from_millis(RETRANSMISSION_DELAY - time));
+            tokio::time::sleep(Duration::from_millis(RETRANSMISSION_DELAY - time)).await;
         }
     }
 

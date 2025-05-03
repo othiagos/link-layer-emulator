@@ -85,26 +85,14 @@ impl Payload {
     }
 
     pub fn new(data: Vec<u8>, id: u16, flag: u8) -> Self {
-        let mut payload = if data.is_empty() {
-            Self {
-                f_sync: SYNC,
-                s_sync: SYNC,
-                chksum: 0,
-                length: 0,
-                id,
-                flag,
-                data,
-            }
-        } else {
-            Self {
-                f_sync: SYNC,
-                s_sync: SYNC,
-                chksum: 0,
-                length: data.len() as u16,
-                id,
-                flag,
-                data,
-            }
+        let mut payload = Self {
+            f_sync: SYNC,
+            s_sync: SYNC,
+            chksum: 0,
+            length: data.len() as u16,
+            id,
+            flag,
+            data,
         };
 
         payload.chksum = Payload::checksum(&payload.as_bytes_without_checksum());
