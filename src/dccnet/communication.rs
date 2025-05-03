@@ -15,6 +15,8 @@ pub enum NetworkErrorKind {
     UnexpectedFlagError,
     RetransmissionError,
     InvalidIdError,
+    TimeoutError,
+    ConnectionClosed,
     Other,
 }
 

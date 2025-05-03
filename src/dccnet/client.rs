@@ -1,5 +1,5 @@
 use std::fs::File;
-use std::io::{BufReader, BufWriter};
+use std::io::{BufReader, BufWriter, Error, ErrorKind};
 use std::sync::Arc;
 
 use tokio::net::TcpStream;
@@ -17,10 +17,15 @@ pub async fn run_client<A: tokio::net::ToSocketAddrs>(
 
     use tokio::time::{Duration, timeout};
 
-    let stream = timeout(Duration::from_secs(3), TcpStream::connect(addr))
-        .await
-        .expect("Timeout while connecting to server")
-        .expect("Could not connect to server");
+    let stream = match timeout(Duration::from_secs(3), TcpStream::connect(addr)).await {
+        Ok(Ok(stream)) => stream,
+        Ok(Err(e)) => {
+            return Err(e);
+        }
+        Err(e) => {
+            return Err(Error::new(ErrorKind::TimedOut, e));
+        }
+    };
 
     let (reader_half, writer_half) = stream.into_split();
 

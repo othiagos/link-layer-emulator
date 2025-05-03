@@ -65,6 +65,11 @@ pub async fn handle_client_receive(
         };
 
         if payload.flag == network::FLAG_END {
+            if !payload.data.is_empty() {
+                output.write_all(&payload.data)?;
+                output.flush()?;
+            }
+
             break;
         }
 
