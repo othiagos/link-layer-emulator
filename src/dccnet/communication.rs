@@ -6,7 +6,7 @@ use super::network;
 use super::network::Payload;
 use tokio::{
     io::AsyncWriteExt,
-    net::tcp::{OwnedReadHalf, OwnedWriteHalf},
+    net::tcp::OwnedWriteHalf,
     sync::Mutex, time::Instant,
 };
 
@@ -50,8 +50,7 @@ impl fmt::Display for NetworkError {
 
 #[inline(always)]
 pub fn next_id(id: u16) -> u16 {
-    // (id + 1) % 2
-    id + 1
+    (id + 1) % 2
 }
 
 fn check_received_rst(payload: &Payload) -> Result<(), NetworkError> {
@@ -69,11 +68,10 @@ fn check_received_rst(payload: &Payload) -> Result<(), NetworkError> {
 }
 
 pub async fn send_frame(
-    stream_read: &Mutex<OwnedReadHalf>,
     stream_white: &Mutex<OwnedWriteHalf>,
     payload: &Payload,
 ) -> Result<usize, NetworkError> {
-    const RETRANSMISSION_DELAY: u64 = 1000;
+    const RETRANSMISSION_DELAY: u64 = 100;
 
     for curr_attempt in 0..network::MAX_SEND_ATTEMPTS {
         if let Err(e) = stream_white
@@ -91,7 +89,7 @@ pub async fn send_frame(
 
         let start = Instant::now();
 
-        match wait_ack(stream_read, payload.id).await {
+        match wait_ack(payload.id).await {
             Ok(_) => {
                 if curr_attempt > 0 {
                     println!("SUCCESS RETRANSMISSION");
@@ -131,14 +129,14 @@ pub async fn send_frame(
 }
 
 pub async fn receive_frame(
-    stream_read: &Mutex<OwnedReadHalf>,
     stream_white: &Mutex<OwnedWriteHalf>,
 ) -> Result<Payload, NetworkError> {
-    let payload = sync_read::read_stream_data(stream_read).await?;
+    let payload = sync_read::read_stream_data().await?;
 
     check_received_rst(&payload)?;
 
     if payload.flag == network::FLAG_ACK {
+        println!("INVALID FLAG DATA");
         return Err(NetworkError::new(
             NetworkErrorKind::UnexpectedFlagError,
             "Received ACK instead of data",
@@ -154,12 +152,13 @@ pub async fn receive_frame(
     Ok(payload)
 }
 
-async fn wait_ack(stream_read: &Mutex<OwnedReadHalf>, id: u16) -> Result<Payload, NetworkError> {
-    let payload = sync_read::read_stream_ack(stream_read).await?;
+async fn wait_ack(id: u16) -> Result<Payload, NetworkError> {
+    let payload = sync_read::read_stream_ack().await?;
 
     check_received_rst(&payload)?;
 
     if payload.flag != network::FLAG_ACK {
+        println!("INVALID FLAG ACK");
         return Err(NetworkError::new(
             NetworkErrorKind::UnexpectedFlagError,
             "Received unexpected flag",
@@ -167,6 +166,7 @@ async fn wait_ack(stream_read: &Mutex<OwnedReadHalf>, id: u16) -> Result<Payload
     }
 
     if payload.id != id {
+        println!("INVALID ACK ID {} != {}", payload.id, id);
         return Err(NetworkError::new(
             NetworkErrorKind::InvalidIdError,
             &format!("Received ACK with invalid ID: {}", payload.id),
@@ -191,7 +191,7 @@ async fn send_ack(stream_white: &Mutex<OwnedWriteHalf>, id: u16) {
     }
 }
 
-pub async fn send_rst(stream_white: &Mutex<OwnedWriteHalf>, data: Option<Vec<u8>>) {
+pub async fn _send_rst(stream_white: &Mutex<OwnedWriteHalf>, data: Option<Vec<u8>>) {
     let payload = Payload::new(data.unwrap_or_default(), u16::MAX, network::FLAG_RST);
     println!("SEND RST {payload}");
 

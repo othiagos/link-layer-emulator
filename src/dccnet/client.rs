@@ -1,9 +1,11 @@
 use std::fs::File;
 use std::io::{BufReader, BufWriter};
+use std::sync::Arc;
 
 use tokio::net::TcpStream;
 use tokio::sync::Mutex;
 
+use crate::dccnet::sync_read;
 use crate::dccnet::xfer::{handle_client_receive, handle_client_send};
 
 pub async fn run_client<A: tokio::net::ToSocketAddrs>(
@@ -22,12 +24,13 @@ pub async fn run_client<A: tokio::net::ToSocketAddrs>(
 
     let (reader_half, writer_half) = stream.into_split();
 
-    let reader_half_mutex = Mutex::new(reader_half);
-    let writer_half_mutex = std::sync::Arc::new(Mutex::new(writer_half));
+    let reader_half_mutex =  Arc::new(Mutex::new(reader_half));
+    let writer_half_mutex = Arc::new(Mutex::new(writer_half));
 
-    let future_send = handle_client_send(&reader_half_mutex, &writer_half_mutex, &mut input);
-    let future_receive = handle_client_receive(&reader_half_mutex, &writer_half_mutex, &mut output);
-
+    let future_send = handle_client_send( &writer_half_mutex, &mut input);
+    let future_receive = handle_client_receive(&writer_half_mutex, &mut output);
+    
+    sync_read::read_stream_data_loop(reader_half_mutex).await;
     let (result_send, result_receive) = tokio::join!(future_send, future_receive);
 
     result_send.unwrap_or_else(|e| {

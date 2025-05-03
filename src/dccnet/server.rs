@@ -1,10 +1,11 @@
 use std::fs::File;
 use std::io::{BufReader, BufWriter, Error};
+use std::sync::Arc;
 
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Mutex;
 
-use crate::dccnet::communication;
+use crate::dccnet::sync_read;
 use crate::dccnet::xfer::{handle_client_receive, handle_client_send};
 
 pub async fn run_server(port: u16, mut input: BufReader<File>, mut output: BufWriter<File>) {
@@ -16,11 +17,10 @@ pub async fn run_server(port: u16, mut input: BufReader<File>, mut output: BufWr
         });
     println!("Server listening on [::]:{}", port);
 
-    loop {
-        match listener.accept().await {
-            Ok((stream, _)) => handle_incoming_stream(Ok(stream), &mut input, &mut output).await,
-            Err(e) => eprintln!("Failed to accept connection: {}", e),
-        }
+    
+    match listener.accept().await {
+        Ok((stream, _)) => handle_incoming_stream(Ok(stream), &mut input, &mut output).await,
+        Err(e) => eprintln!("Failed to accept connection: {}", e),
     }
 }
 
@@ -50,24 +50,22 @@ async fn handle_incoming_connection(
     println!("New connection from {}", peer_addr);
 
     let (reader_half, writer_half) = stream.into_split();
-    let reader_half_mutex = Mutex::new(reader_half);
-    let writer_half_mutex = Mutex::new(writer_half);
+    let reader_half_mutex =  Arc::new(Mutex::new(reader_half));
+    let writer_half_mutex =  Arc::new(Mutex::new(writer_half));
+    
+    let future_send = handle_client_send(&writer_half_mutex, input);
+    let future_receive = handle_client_receive(&writer_half_mutex, output);
+    
+    sync_read::read_stream_data_loop(reader_half_mutex).await;
+    let (result_send, result_receive) = tokio::join!(future_send, future_receive);
+    
+    result_send.unwrap_or_else(|e| {
+        eprintln!("Error receiving data: {}", e);
+    });
 
-    let handle_receive = async {
-        if let Err(e) = handle_client_receive(&reader_half_mutex, &writer_half_mutex, output).await {
-            communication::send_rst(&writer_half_mutex, None).await;
-            println!("Error receiving data: {}", e);
-        }
-    };
-
-    let handle_send = async {
-        if let Err(e) = handle_client_send(&reader_half_mutex, &writer_half_mutex, input).await {
-            communication::send_rst(&writer_half_mutex, None).await;
-            println!("Error sending data: {}", e);
-        }
-    };
-
-    tokio::join!(handle_receive, handle_send);
+    result_receive.unwrap_or_else(|e| {
+        eprintln!("Error sending data: {}", e);
+    });
 
     println!("Connection closed with {}", peer_addr);
 }
