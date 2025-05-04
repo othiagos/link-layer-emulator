@@ -1,46 +1,38 @@
-use std::{io::Error, sync::Arc};
+use std::sync::Arc;
 
 use tokio::{
-    net::{
-        TcpStream,
-        tcp::OwnedWriteHalf,
-    },
+    net::{TcpStream, tcp::OwnedWriteHalf},
     sync::Mutex,
 };
 
-use super::{communication, network::{self, Payload}, sync_read};
+use super::{
+    communication::{self, NetworkError, NetworkErrorKind},
+    network::{self, Payload},
+    sync_read,
+};
 
 async fn validate_gas(
     stream_white: &Mutex<OwnedWriteHalf>,
     mut gas: Vec<u8>,
-) -> Result<u16, std::io::Error> {
+) -> Result<u16, NetworkError> {
     gas.push(b'\n');
 
     let gas_payload = Payload::new(gas, network::START_ID, network::FLAG_SED);
 
-    communication::send_frame(stream_white, &gas_payload)
-        .await
-        .map_err(|e| {
-            Error::new(
-                std::io::ErrorKind::Other,
-                format!("Failed to send gas payload: {}", e),
-            )
-        })?;
+    communication::send_frame(stream_white, &gas_payload).await?;
 
     let mut id = communication::next_id(gas_payload.id);
 
-    let payload = communication::receive_frame(stream_white)
-        .await
-        .map_err(|e| {
-            Error::new(
-                std::io::ErrorKind::Other,
-                format!("Failed to receive payload: {}", e),
-            )
-        })?;
+    let payload = loop {
+        match communication::receive_frame(stream_white).await {
+            Ok(payload) => break payload,
+            Err(_) => continue,
+        }
+    };
 
     if gas_payload.id != payload.id {
-        return Err(Error::new(
-            std::io::ErrorKind::InvalidData,
+        return Err(NetworkError::new(
+            NetworkErrorKind::InvalidIdError,
             "Received ID is incorrect",
         ));
     }
@@ -50,14 +42,7 @@ async fn validate_gas(
     let rash_string = format!("{:x}\n", md5_hash);
 
     let send_payload = Payload::new(rash_string.as_bytes().to_vec(), id, network::FLAG_SED);
-    communication::send_frame(stream_white, &send_payload)
-        .await
-        .map_err(|e| {
-            Error::new(
-                std::io::ErrorKind::Other,
-                format!("Failed to send MD5 payload: {}", e),
-            )
-        })?;
+    communication::send_frame(stream_white, &send_payload).await?;
 
     id = communication::next_id(payload.id);
 
@@ -65,14 +50,17 @@ async fn validate_gas(
 }
 
 #[inline(always)]
-fn trim_data_payload(data: Vec<u8>) -> Result<Vec<u8>, Error> {
+fn trim_data_payload(data: Vec<u8>) -> Result<Vec<u8>, NetworkError> {
     match String::from_utf8(data) {
         Ok(data) => Ok(data.trim().as_bytes().to_vec()),
-        Err(e) => Err(Error::new(std::io::ErrorKind::InvalidData, e)),
+        Err(e) => Err(NetworkError::new(
+            NetworkErrorKind::Other,
+            e.to_string().as_ref(),
+        )),
     }
 }
 
-async fn read_date_from_server(stream: TcpStream, gas: Vec<u8>) -> Result<(), Error> {
+async fn read_date_from_server(stream: TcpStream, gas: Vec<u8>) -> Result<(), NetworkError> {
     let mut payload_data = vec![];
 
     let (read_half, write_half) = stream.into_split();
@@ -112,14 +100,7 @@ async fn read_date_from_server(stream: TcpStream, gas: Vec<u8>) -> Result<(), Er
 
             let send_payload = Payload::new(rash_string.as_bytes().to_vec(), id, network::FLAG_SED);
 
-            communication::send_frame(&stream_white, &send_payload)
-                .await
-                .map_err(|e| {
-                    Error::new(
-                        std::io::ErrorKind::Other,
-                        format!("Failed to send MD5 payload: {}", e),
-                    )
-                })?;
+            communication::send_frame(&stream_white, &send_payload).await?;
 
             id = communication::next_id(id);
         }
@@ -131,7 +112,7 @@ async fn read_date_from_server(stream: TcpStream, gas: Vec<u8>) -> Result<(), Er
     Ok(())
 }
 
-pub async fn handle_tcp_communication(stream: TcpStream, gas: Vec<u8>) -> Result<(), Error> {
+pub async fn handle_tcp_communication(stream: TcpStream, gas: Vec<u8>) -> Result<(), NetworkError> {
     read_date_from_server(stream, gas).await?;
     Ok(())
 }

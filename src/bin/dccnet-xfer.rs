@@ -95,7 +95,7 @@ fn print_usage_and_exit(program_name: &str) {
 #[tokio::main]
 async fn main() {
     let args: Vec<String> = env::args().collect();
-    println!("Arguments: {:?}", args);
+
     if args.len() != 5 {
         print_usage_and_exit(&args[0]);
     }

@@ -1,12 +1,9 @@
 use std::fs::File;
 use std::io::{BufReader, BufWriter, Error, ErrorKind};
-use std::sync::Arc;
 
 use tokio::net::TcpStream;
-use tokio::sync::Mutex;
 
-use crate::dccnet::sync_read;
-use crate::dccnet::xfer::{handle_client_receive, handle_client_send};
+use crate::dccnet::xfer;
 
 pub async fn run_client<A: tokio::net::ToSocketAddrs>(
     addr: A,
@@ -27,24 +24,7 @@ pub async fn run_client<A: tokio::net::ToSocketAddrs>(
         }
     };
 
-    let (reader_half, writer_half) = stream.into_split();
-
-    let reader_half_mutex =  Arc::new(Mutex::new(reader_half));
-    let writer_half_mutex = Arc::new(Mutex::new(writer_half));
-
-    let future_send = handle_client_send( &writer_half_mutex, &mut input);
-    let future_receive = handle_client_receive(&writer_half_mutex, &mut output);
-    
-    sync_read::read_stream_data_loop(reader_half_mutex).await;
-    let (result_send, result_receive) = tokio::join!(future_send, future_receive);
-
-    result_send.unwrap_or_else(|e| {
-        eprintln!("Error receiving data: {}", e);
-    });
-
-    result_receive.unwrap_or_else(|e| {
-        eprintln!("Error sending data: {}", e);
-    });
+    xfer::handle_connection(stream, &mut input, &mut output).await;
 
     println!("End connection with server!");
     Ok(())

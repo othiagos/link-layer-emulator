@@ -115,7 +115,6 @@ pub async fn receive_frame(stream_white: &Mutex<OwnedWriteHalf>) -> Result<Paylo
     check_received_rst(&payload)?;
 
     if payload.flag == network::FLAG_ACK {
-        println!("INVALID FLAG DATA");
         return Err(NetworkError::new(
             NetworkErrorKind::UnexpectedFlagError,
             "Received ACK instead of data",
@@ -137,7 +136,6 @@ async fn wait_ack(id: u16) -> Result<Payload, NetworkError> {
     check_received_rst(&payload)?;
 
     if payload.flag != network::FLAG_ACK {
-        println!("INVALID FLAG ACK");
         return Err(NetworkError::new(
             NetworkErrorKind::UnexpectedFlagError,
             "Received unexpected flag",
@@ -145,7 +143,6 @@ async fn wait_ack(id: u16) -> Result<Payload, NetworkError> {
     }
 
     if payload.id != id {
-        println!("INVALID ACK ID {} != {}", payload.id, id);
         return Err(NetworkError::new(
             NetworkErrorKind::InvalidIdError,
             &format!("Received ACK with invalid ID: {}", payload.id),
@@ -170,7 +167,7 @@ async fn send_ack(stream_white: &Mutex<OwnedWriteHalf>, id: u16) {
     }
 }
 
-pub async fn _send_rst(stream_white: &Mutex<OwnedWriteHalf>, data: Option<Vec<u8>>) {
+pub async fn send_rst(stream_white: &Mutex<OwnedWriteHalf>, data: Option<Vec<u8>>) {
     let payload = Payload::new(data.unwrap_or_default(), u16::MAX, network::FLAG_RST);
     println!("SEND RST {payload}");
 

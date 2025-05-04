@@ -1,15 +1,50 @@
 use std::{
     fs::File,
     io::{BufReader, BufWriter, Read, Write},
+    sync::Arc,
 };
 
-use tokio::net::tcp::OwnedWriteHalf;
-use tokio::sync::Mutex;
+use tokio::{
+    io::AsyncWriteExt,
+    net::{TcpStream, tcp::OwnedWriteHalf},
+    sync::Mutex,
+};
 
-use crate::dccnet::{
+use super::{
     communication::{self, NetworkErrorKind},
     network::{self, Payload},
+    sync_read
 };
+
+pub async fn handle_connection(stream: TcpStream, input: &mut BufReader<File>, output: &mut BufWriter<File>) {
+    let (reader_half, writer_half) = stream.into_split();
+    let reader_half_mutex =  Arc::new(Mutex::new(reader_half));
+    let writer_half_mutex = Arc::new(Mutex::new(writer_half));
+    
+    let future_send = handle_client_send( &writer_half_mutex, input);
+    let future_receive = handle_client_receive(&writer_half_mutex, output);
+    
+    sync_read::read_stream_data_loop(reader_half_mutex).await;
+    let (result_send, result_receive) = tokio::join!(future_send, future_receive);
+    
+    result_send.unwrap_or_else(|e| {
+        let error_message = e.to_string();
+        let writer_half_mutex_clone = Arc::clone(&writer_half_mutex);
+        tokio::spawn(async move {
+            communication::send_rst(&writer_half_mutex_clone, Some(error_message.as_bytes().to_vec())).await;
+        });
+        eprintln!("Error receiving data: {}", e);
+    });
+    
+    result_receive.unwrap_or_else(|e| {
+        eprintln!("Error sending data: {}", e);
+    });
+
+    writer_half_mutex.lock().await.shutdown().await.unwrap_or_else(|e| {
+        eprintln!("Error shutting connection: {}", e);
+    });
+    
+}
 
 pub async fn handle_client_send(
     stream_white: &Mutex<OwnedWriteHalf>,

@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use once_cell::sync::Lazy;
-use tokio::time::{sleep, timeout, Duration};
+use tokio::time::{Duration, sleep, timeout};
 use tokio::{io::AsyncReadExt, net::tcp::OwnedReadHalf, sync::Mutex};
 
 const WAIT_ACK_TIMEOUT: u64 = 1000;
@@ -20,19 +20,18 @@ async fn read_next_payload(stream_read: &Mutex<OwnedReadHalf>) -> Result<Payload
     let read_result = timeout(Duration::from_secs(3), async {
         let mut stream = stream_read.lock().await;
         stream.read(&mut buf).await
-    }).await;
+    })
+    .await;
 
     let bytes_read = match read_result {
         Ok(Ok(bytes)) => bytes,
         Ok(Err(e)) => {
-            println!("Read error: {}", e);
             return Err(NetworkError::new(
                 NetworkErrorKind::ConnectionError,
                 &format!("Read error: {}", e),
             ));
         }
         Err(_) => {
-            println!("Read operation timed out");
             return Err(NetworkError::new(
                 NetworkErrorKind::TimeoutError,
                 "Read operation timed out",
@@ -41,7 +40,6 @@ async fn read_next_payload(stream_read: &Mutex<OwnedReadHalf>) -> Result<Payload
     };
 
     if bytes_read == 0 {
-        println!("Connection closed by peer");
         return Err(NetworkError::new(
             NetworkErrorKind::ConnectionClosed,
             "Connection closed by peer",
@@ -79,32 +77,32 @@ async fn process_next_payload(stream_read: &Arc<Mutex<OwnedReadHalf>>) -> Result
             handle_payload(payload).await;
             Ok(())
         }
-        Err(e) => {
-            handle_read_error(e).await;
-            Err(true)
-        }
+        Err(e) => handle_read_error(e).await,
     }
 }
 
-async fn handle_read_error(error: NetworkError) {
+async fn handle_read_error(error: NetworkError) -> Result<(), bool> {
     match error.kind {
         NetworkErrorKind::TimeoutError => {
             println!("Timeout error: {}", error);
             end_connection().await;
+            Err(true)
         }
         NetworkErrorKind::ConnectionClosed => {
             println!("Connection closed: {}", error);
             end_connection().await;
+            Err(true)
         }
         _ => {
             println!("Unhandled error: {}", error);
+            Err(false)
         }
     }
 }
 
 async fn end_connection() {
     let payload = Payload::new(vec![], 0, network::FLAG_END);
-    
+
     store_ack_payload(payload.clone()).await;
     store_data_payload(payload).await;
 }
